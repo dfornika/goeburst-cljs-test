@@ -5,20 +5,39 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- make-uf [n]
-  (vec (range n)))
+  {:parent (vec (range n))
+   :rank   (vec (repeat n 0))})
 
 (defn- uf-find [uf x]
-  (if (= (uf x) x)
-    [uf x]
-    (let [[uf root] (uf-find uf (uf x))]
-      [(assoc uf x root) root])))
+  (let [parent (:parent uf)
+        [root path] (loop [node x, path []]
+                      (let [p (parent node)]
+                        (if (= p node)
+                          [node path]
+                          (recur p (conj path node)))))
+        parent' (reduce (fn [p node] (assoc p node root)) parent path)]
+    [(assoc uf :parent parent') root]))
 
 (defn- uf-union [uf x y]
   (let [[uf rx] (uf-find uf x)
         [uf ry] (uf-find uf y)]
     (if (= rx ry)
       [uf false]
-      [(assoc uf rx ry) true])))
+      (let [rank   (:rank uf)
+            rank-x (rank rx)
+            rank-y (rank ry)]
+        (cond
+          (< rank-x rank-y)
+          [(assoc-in uf [:parent rx] ry) true]
+
+          (> rank-x rank-y)
+          [(assoc-in uf [:parent ry] rx) true]
+
+          :else
+          [(-> uf
+               (assoc-in [:parent ry] rx)
+               (update :rank assoc rx (inc rank-x)))
+           true])))))
 
 ;; ---------------------------------------------------------------------------
 ;; SLV connected components

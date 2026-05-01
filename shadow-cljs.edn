@@ -1,6 +1,6 @@
 {:source-paths ["src/main"]
 
- :dependencies []
+ :dependencies [[reagent "1.2.0"]]
 
  :builds
  {:app {:target     :browser

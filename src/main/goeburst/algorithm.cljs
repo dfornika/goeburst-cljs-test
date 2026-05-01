@@ -1,54 +1,6 @@
 (ns goeburst.algorithm)
 
 ;; ---------------------------------------------------------------------------
-;; Neighbor counts
-;; ---------------------------------------------------------------------------
-
-(defn neighbor-counts
-  "For each ST index, count how many other STs are at distance 1 (SLV),
-   2 (DLV), and 3 (TLV) according to the distance matrix."
-  [matrix]
-  (let [n (count matrix)]
-    (mapv (fn [i]
-            (reduce (fn [acc j]
-                      (if (= i j)
-                        acc
-                        (let [d (get-in matrix [i j])]
-                          (cond
-                            (= d 1) (update acc :slv inc)
-                            (= d 2) (update acc :dlv inc)
-                            (= d 3) (update acc :tlv inc)
-                            :else acc))))
-                    {:slv 0 :dlv 0 :tlv 0}
-                    (range n)))
-          (range n))))
-
-;; ---------------------------------------------------------------------------
-;; Edge priority (total order for Kruskal's)
-;; ---------------------------------------------------------------------------
-
-(defn- edge-priority
-  "Return a vector that, when compared lexicographically, implements the
-   goeBURST total order.  Lower is better (we sort ascending and pick first).
-
-   Rules (in order):
-   1. Allelic distance d  – lower wins  (SLV=1 < DLV=2 < TLV=3)
-   2. max SLV count of the two endpoints – higher wins  (negate)
-   3. max DLV count – higher wins
-   4. max TLV count – higher wins
-   5. max occurrence frequency – higher wins  (placeholder: always 1)
-   6. min ST index – lower wins"
-  [counts [i j d]]
-  (let [ci (counts i)
-        cj (counts j)]
-    [d
-     (- (max (:slv ci) (:slv cj)))
-     (- (max (:dlv ci) (:dlv cj)))
-     (- (max (:tlv ci) (:tlv cj)))
-     (- (max 1 1))                     ; frequency placeholder
-     (min i j)]))
-
-;; ---------------------------------------------------------------------------
 ;; Union-Find (path-compressed)
 ;; ---------------------------------------------------------------------------
 
@@ -69,13 +21,85 @@
       [(assoc uf rx ry) true])))
 
 ;; ---------------------------------------------------------------------------
+;; SLV connected components
+;; ---------------------------------------------------------------------------
+
+(defn slv-components
+  "Returns a vector of component-root IDs, one per ST index.
+   Two STs share a component iff they are connected via SLV links (λ=1)."
+  [matrix]
+  (let [n  (count matrix)
+        uf (reduce (fn [uf [i j]]
+                     (first (uf-union uf i j)))
+                   (make-uf n)
+                   (for [i (range n)
+                         j (range (inc i) n)
+                         :when (= 1 (get-in matrix [i j]))]
+                     [i j]))]
+    (loop [i 0, uf uf, roots []]
+      (if (= i n)
+        roots
+        (let [[uf root] (uf-find uf i)]
+          (recur (inc i) uf (conj roots root)))))))
+
+;; ---------------------------------------------------------------------------
+;; CC-relative neighbor counts  (μ from Francisco et al. 2009, eq. 2)
+;; ---------------------------------------------------------------------------
+
+(defn cc-relative-counts
+  "For each ST at index i, count SLVs, DLVs, TLVs within i's SLV-connected
+   component (clonal complex).  Returns a vector of {:slv n :dlv n :tlv n}."
+  [matrix]
+  (let [n    (count matrix)
+        comp (slv-components matrix)]
+    (mapv (fn [i]
+            (reduce (fn [acc j]
+                      (if (or (= i j) (not= (comp i) (comp j)))
+                        acc
+                        (let [d (get-in matrix [i j])]
+                          (cond
+                            (= d 1) (update acc :slv inc)
+                            (= d 2) (update acc :dlv inc)
+                            (= d 3) (update acc :tlv inc)
+                            :else acc))))
+                    {:slv 0 :dlv 0 :tlv 0}
+                    (range n)))
+          (range n))))
+
+;; ---------------------------------------------------------------------------
+;; Edge priority  (total order for Kruskal's)
+;; ---------------------------------------------------------------------------
+
+(defn- edge-priority
+  "Return a sort key implementing the goeBURST total order.
+   Sorting ascending; a lower key means a higher-quality edge (selected first).
+
+   Per Francisco et al. 2009, at each level i (SLV → DLV → TLV → freq):
+     1. max of both endpoint counts at level i  (higher wins → negate)
+     2. min of both endpoint counts at level i  (higher wins → negate)
+   Final tiebreak: lower ST index wins → (max i j) then (min i j)."
+  [counts [i j d]]
+  (let [ci (counts i)
+        cj (counts j)]
+    [d
+     (- (max (:slv ci) (:slv cj)))
+     (- (min (:slv ci) (:slv cj)))
+     (- (max (:dlv ci) (:dlv cj)))
+     (- (min (:dlv ci) (:dlv cj)))
+     (- (max (:tlv ci) (:tlv cj)))
+     (- (min (:tlv ci) (:tlv cj)))
+     (- (max 1 1))   ; occurrence frequency – placeholder (always 1)
+     (- (min 1 1))
+     (max i j)
+     (min i j)]))
+
+;; ---------------------------------------------------------------------------
 ;; Kruskal's MST
 ;; ---------------------------------------------------------------------------
 
 (defn kruskal
   "Run Kruskal's algorithm with goeBURST edge priority.
-   Returns a sequence of edges {:i :j :d :level} that form the MST forest,
-   where :level is the tiebreak level reached (1=SLV, 2=DLV, 3=TLV)."
+   Returns a vector of edges {:i :j :d} forming the MST forest."
   [n-sts matrix counts]
   (let [edges (->> (for [i (range n-sts)
                          j (range (inc i) n-sts)
@@ -88,11 +112,10 @@
            mst       []]
       (if (empty? remaining)
         mst
-        (let [[i j d :as edge] (first remaining)
-              [uf2 joined?]    (uf-union uf i j)]
+        (let [[i j d] (first remaining)
+              [uf2 joined?] (uf-union uf i j)]
           (if joined?
-            (recur (rest remaining) uf2
-                   (conj mst {:i i :j j :d d :level d}))
+            (recur (rest remaining) uf2 (conj mst {:i i :j j :d d}))
             (recur (rest remaining) uf mst)))))))
 
 ;; ---------------------------------------------------------------------------
@@ -101,10 +124,10 @@
 
 (defn run
   "Given parsed input {:ids [...] :matrix [[...]]} run goeBURST and return
-   {:ids :nodes :edges} where nodes carry neighbor-count metadata."
+   {:ids :nodes :edges} where nodes carry CC-relative neighbor-count metadata."
   [{:keys [ids matrix]}]
   (let [n      (count ids)
-        counts (neighbor-counts matrix)
+        counts (cc-relative-counts matrix)
         mst    (kruskal n matrix counts)
         nodes  (mapv (fn [i]
                        (merge {:id (ids i) :idx i}

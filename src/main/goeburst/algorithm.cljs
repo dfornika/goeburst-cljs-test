@@ -11,12 +11,14 @@
   (let [n (count matrix)]
     (mapv (fn [i]
             (reduce (fn [acc j]
-                      (let [d (get-in matrix [i j])]
-                        (cond
-                          (= d 1) (update acc :slv inc)
-                          (= d 2) (update acc :dlv inc)
-                          (= d 3) (update acc :tlv inc)
-                          :else acc)))
+                      (if (= i j)
+                        acc
+                        (let [d (get-in matrix [i j])]
+                          (cond
+                            (= d 1) (update acc :slv inc)
+                            (= d 2) (update acc :dlv inc)
+                            (= d 3) (update acc :tlv inc)
+                            :else acc))))
                     {:slv 0 :dlv 0 :tlv 0}
                     (range n)))
           (range n))))
@@ -30,7 +32,7 @@
    goeBURST total order.  Lower is better (we sort ascending and pick first).
 
    Rules (in order):
-   1. Allelic distance d  – lower wins  (SLV=1 > DLV=2 > TLV=3)
+   1. Allelic distance d  – lower wins  (SLV=1 < DLV=2 < TLV=3)
    2. max SLV count of the two endpoints – higher wins  (negate)
    3. max DLV count – higher wins
    4. max TLV count – higher wins

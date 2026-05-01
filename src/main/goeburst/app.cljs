@@ -25,8 +25,11 @@
                         parsed (parse/parse-distance-matrix text)
                         result (algo/run parsed)]
                     (swap! state assoc :parsed parsed :result result :error nil))
-                  (catch js/Error err
-                    (swap! state assoc :error (.-message err))))))
+                  (catch :default err
+                    (swap! state assoc :error (or (ex-message err)
+                                                  (when (and err (exists? (.-message err)))
+                                                    (.-message err))
+                                                  (str err)))))))
         (.readAsText reader file)))))
 
 ;; ---------------------------------------------------------------------------

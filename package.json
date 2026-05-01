@@ -1,0 +1,12 @@
+{
+  "name": "goeburst-cljs",
+  "version": "0.1.0",
+  "description": "goeBURST minimum spanning tree viewer",
+  "scripts": {
+    "dev": "shadow-cljs watch app",
+    "release": "shadow-cljs release app"
+  },
+  "devDependencies": {
+    "shadow-cljs": "2.28.18"
+  }
+}

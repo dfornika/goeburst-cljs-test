@@ -2,22 +2,27 @@
   (:require ["d3" :as d3]
             [reagent.core :as r]))
 
-(def ^:private w 900)
-(def ^:private h 600)
-
-(defn- link-color [d]
-  (case d 1 "#4477aa" 2 "#228833" 3 "#cc3311" "#999"))
+(defn- link-color [d max-d]
+  (cond
+    (= d 1) "#4477aa"
+    (= d 2) "#228833"
+    (= d 3) "#cc3311"
+    :else (let [t (/ (- d 4) (max 1 (- max-d 4)))]
+            (.interpolateRdYlBu d3 (- 1 (* 0.6 t))))))
 
 (defn- setup-simulation! [svg-el {:keys [ids nodes edges]}]
   (-> (.select d3 svg-el) (.selectAll "*") .remove)
-  (let [js-nodes (clj->js (mapv (fn [{:keys [id slv]}] {:id id :slv slv}) nodes))
+  (let [w        (max 400 (.-clientWidth svg-el))
+        h        (max 300 (.-clientHeight svg-el))
+        max-d    (reduce (fn [m {:keys [d]}] (max m d)) 1 edges)
+        js-nodes (clj->js (mapv (fn [{:keys [id slv]}] {:id id :slv slv}) nodes))
         js-links (clj->js (mapv (fn [{:keys [i j d]}]
                                   {:source (nth ids i) :target (nth ids j) :d d})
                                 edges))
-        svg      (-> (.select d3 svg-el)
-                     (.attr "viewBox" (str "0 0 " w " " h)))
-        link-g   (.append svg "g")
-        node-g   (.append svg "g")
+        svg      (.select d3 svg-el)
+        g        (.append svg "g")
+        link-g   (.append g "g")
+        node-g   (.append g "g")
         sim      (-> (.forceSimulation d3 js-nodes)
                      (.force "link"
                              (-> (.forceLink d3 js-links)
@@ -45,7 +50,7 @@
                      (.selectAll "line")
                      (.data js-links)
                      (.join "line")
-                     (.attr "stroke" #(link-color (.-d %)))
+                     (.attr "stroke" #(link-color (.-d %) max-d))
                      (.attr "stroke-width" 1.5)
                      (.attr "stroke-opacity" 0.8))
         node-gs  (-> node-g
@@ -74,9 +79,14 @@
            (.attr links "x2" #(.. % -target -x))
            (.attr links "y2" #(.. % -target -y))
            (.attr node-gs "transform"
-                  #(str "translate(" (.-x %) "," (.-y %) ")"))))))
+                  #(str "translate(" (.-x %) "," (.-y %) ")"))))
+    (.call svg
+           (-> (.zoom d3)
+               (.scaleExtent (clj->js [0.05 8]))
+               (.on "zoom" (fn [event]
+                             (.attr g "transform" (.. event -transform toString))))))))
 
-(defn force-graph [result]
+(defn force-graph [_]
   (let [svg-ref (atom nil)]
     (r/create-class
      {:display-name "force-graph"
@@ -91,8 +101,7 @@
       :reagent-render
       (fn [_]
         [:svg {:ref   #(reset! svg-ref %)
-               :style {:width "100%" :height (str h "px") :display "block"
-                       :border "1px solid #e0e0e0" :border-radius "4px"}}])})))
+               :style {:width "100%" :height "100%" :display "block"}}])})))
 
 (defn legend []
   [:div {:style {:display "flex" :gap "1.5rem" :margin "0.5rem 0"

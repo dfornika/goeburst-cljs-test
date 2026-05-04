@@ -1,7 +1,7 @@
 (ns goeburst.algorithm)
 
 ;; ---------------------------------------------------------------------------
-;; Union-Find (path-compressed)
+;; Union-Find (path-compressed, union-by-rank)
 ;; ---------------------------------------------------------------------------
 
 (defn- make-uf [n]
@@ -27,17 +27,12 @@
             rank-x (rank rx)
             rank-y (rank ry)]
         (cond
-          (< rank-x rank-y)
-          [(assoc-in uf [:parent rx] ry) true]
-
-          (> rank-x rank-y)
-          [(assoc-in uf [:parent ry] rx) true]
-
-          :else
-          [(-> uf
-               (assoc-in [:parent ry] rx)
-               (update :rank assoc rx (inc rank-x)))
-           true])))))
+          (< rank-x rank-y) [(assoc-in uf [:parent rx] ry) true]
+          (> rank-x rank-y) [(assoc-in uf [:parent ry] rx) true]
+          :else             [(-> uf
+                                 (assoc-in [:parent ry] rx)
+                                 (update :rank assoc rx (inc rank-x)))
+                             true])))))
 
 ;; ---------------------------------------------------------------------------
 ;; SLV connected components
@@ -89,17 +84,31 @@
 ;; Edge priority  (total order for Kruskal's)
 ;; ---------------------------------------------------------------------------
 
-(defn- edge-priority
-  "Return a sort key implementing the goeBURST total order.
-   Sorting ascending; a lower key means a higher-quality edge (selected first).
+(defn- compare-st-ids
+  "Compares ST identifier strings with length-first ordering (shorter < longer),
+   falling back to lexicographic for equal lengths.  This matches the Java
+   implementation and produces numeric ordering for typical integer ST IDs."
+  [a b]
+  (let [len-diff (- (count a) (count b))]
+    (if (zero? len-diff) (compare a b) len-diff)))
 
-   Per Francisco et al. 2009, at each level i (SLV → DLV → TLV → freq):
-     1. max of both endpoint counts at level i  (higher wins → negate)
-     2. min of both endpoint counts at level i  (higher wins → negate)
-   Final tiebreak: lower ST index wins → (max i j) then (min i j)."
-  [counts [i j d]]
-  (let [ci (counts i)
-        cj (counts j)]
+(defn- edge-priority
+  "Returns a sort key implementing the goeBURST total order
+   (Francisco et al. 2009, §Algorithm, total order ≤ on E).
+   Sorting ascending; a lower key means a higher-quality edge.
+
+   At each tiebreak level i (SLV → DLV → TLV → occurrence frequency):
+     1. max of both endpoint μ_i counts  (higher wins → negate for ascending sort)
+     2. min of both endpoint μ_i counts  (higher wins → negate)
+   Final tiebreak: lower ST ID wins, compared with length-first string ordering."
+  [ids counts [i j d]]
+  (let [ci     (counts i)
+        cj     (counts j)
+        id-i   (ids i)
+        id-j   (ids j)
+        [lo-id hi-id] (if (neg? (compare-st-ids id-i id-j))
+                        [id-i id-j]
+                        [id-j id-i])]
     [d
      (- (max (:slv ci) (:slv cj)))
      (- (min (:slv ci) (:slv cj)))
@@ -107,36 +116,70 @@
      (- (min (:dlv ci) (:dlv cj)))
      (- (max (:tlv ci) (:tlv cj)))
      (- (min (:tlv ci) (:tlv cj)))
-     (- (max 1 1))   ; occurrence frequency – placeholder (always 1)
+     (- (max 1 1))         ; occurrence frequency – placeholder (always 1)
      (- (min 1 1))
-     (max i j)
-     (min i j)]))
+     (count lo-id) lo-id   ; ST ID tiebreak: length-first, then lexicographic
+     (count hi-id) hi-id]))
+
+(defn- edge-confidence-level
+  "Returns the 1-indexed tiebreak level at which sort keys ka and kb first
+   diverge after position 0 (the allelic distance).
+
+   Returns:
+     0    – the distance components differ (no count-level tiebreak was needed)
+     1–2  – SLV count comparison was decisive (≈ blue in the paper)
+     3–4  – DLV count comparison was decisive (≈ green)
+     5–6  – TLV count comparison was decisive (≈ red)
+     7–8  – occurrence frequency was decisive
+     9+   – ST ID tiebreak was reached
+     nil  – keys are identical (or ka is the last edge with no successor)"
+  [ka kb]
+  (if (not= (first ka) (first kb))
+    0
+    (loop [level 1, a (next ka), b (next kb)]
+      (cond
+        (or (nil? a) (nil? b)) nil
+        (not= (first a) (first b)) level
+        :else (recur (inc level) (next a) (next b))))))
 
 ;; ---------------------------------------------------------------------------
-;; Kruskal's MST
+;; Kruskal's MST  (Francisco et al. 2009, §goeBURST algorithm)
 ;; ---------------------------------------------------------------------------
 
 (defn kruskal
-  "Run Kruskal's algorithm with goeBURST edge priority.
-   max-level controls the maximum allelic distance for edge inclusion."
-  ([n-sts matrix counts] (kruskal n-sts matrix counts 3))
-  ([n-sts matrix counts max-level]
-   (let [edges (->> (for [i (range n-sts)
+  "Run Kruskal's algorithm with the goeBURST edge priority order.
+   Returns a vector of edges {:i :j :d :level} forming the MST forest.
+
+   :level encodes link confidence: at which tiebreak step the chosen edge
+   was separated from its closest competitor in the sorted edge list.
+   nil  → unique best (no competitor); 1–2 → SLV; 3–4 → DLV; 5–6 → TLV; 7+ → other."
+  ([n-sts ids matrix counts] (kruskal n-sts ids matrix counts 3))
+  ([n-sts ids matrix counts max-level]
+   (let [priority   (fn [e] (edge-priority ids counts e))
+         raw-edges  (for [i (range n-sts)
                           j (range (inc i) n-sts)
                           :let [d (get-in matrix [i j])]
                           :when (and (int? d) (pos? d) (<= d max-level))]
                       [i j d])
-                    (sort-by #(edge-priority counts %)))]
-     (loop [remaining edges
-            uf        (make-uf n-sts)
-            mst       []]
-       (if (empty? remaining)
+         ;; Pre-compute sort keys to avoid redundant calls during sort and level lookup.
+         keyed      (mapv (fn [e] [e (priority e)]) raw-edges)
+         sorted     (vec (sort-by second keyed))
+         n          (count sorted)
+         level-at   (fn [k]
+                      (when (< k (dec n))
+                        (edge-confidence-level (second (nth sorted k))
+                                               (second (nth sorted (inc k))))))]
+     (loop [k   0
+            rem sorted
+            uf  (make-uf n-sts)
+            mst []]
+       (if (empty? rem)
          mst
-         (let [[i j d] (first remaining)
+         (let [[[i j d] _]  (first rem)
                [uf2 joined?] (uf-union uf i j)]
            (if joined?
-             (recur (rest remaining) uf2 (conj mst {:i i :j j :d d}))
-             (recur (rest remaining) uf mst))))))))
+             (recur (inc k) (rest rem) uf2 (conj mst {:i i :j j :d d :level (level-at k)}))
+             (recur (inc k) (rest rem) uf mst))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main entry point
@@ -144,13 +187,14 @@
 
 (defn run
   "Given parsed input {:ids [...] :matrix [[...]]} run goeBURST and return
-   {:ids :nodes :edges} where nodes carry CC-relative neighbor-count metadata.
+   {:ids :nodes :edges} where nodes carry CC-relative neighbor-count metadata
+   and edges carry a :level confidence field.
    max-level controls the maximum allelic distance for edge inclusion (default 3)."
   ([parsed] (run parsed 3))
   ([{:keys [ids matrix]} max-level]
    (let [n      (count ids)
          counts (cc-relative-counts matrix)
-         mst    (kruskal n matrix counts max-level)
+         mst    (kruskal n ids matrix counts max-level)
          nodes  (mapv (fn [i]
                         (merge {:id (ids i) :idx i}
                                (counts i)))

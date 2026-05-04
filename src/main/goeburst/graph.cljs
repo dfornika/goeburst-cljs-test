@@ -11,6 +11,9 @@
             (.interpolateRdYlBu d3 (- 1 (* 0.6 t))))))
 
 (defn- setup-simulation! [svg-el {:keys [ids nodes edges]} vis-state]
+  ;; Stop any running simulation before replacing it.
+  (when-let [prev-sim (:sim @vis-state)]
+    (.stop prev-sim))
   ;; Read state before clearing — zoom transform persists on the DOM element,
   ;; and D3 has mutated the previous js-nodes with current x/y positions.
   (let [prev-transform (.zoomTransform d3 svg-el)
@@ -80,8 +83,8 @@
                        (.join "g")
                        (.call drag)
                        (.attr "cursor" "grab"))]
-      ;; Store live js-nodes so next call can read their current x/y.
-      (swap! vis-state assoc :js-nodes js-nodes)
+      ;; Store live sim and js-nodes so next call can stop the sim and read x/y.
+      (swap! vis-state assoc :sim sim :js-nodes js-nodes)
       (-> node-gs
           (.append "circle")
           (.attr "r" 8)
@@ -122,6 +125,10 @@
       (fn [this _]
         (let [[_ r] (r/argv this)]
           (when @svg-ref (setup-simulation! @svg-ref r vis-state))))
+      :component-will-unmount
+      (fn [_]
+        (when-let [sim (:sim @vis-state)]
+          (.stop sim)))
       :reagent-render
       (fn [_]
         [:svg {:ref   #(reset! svg-ref %)

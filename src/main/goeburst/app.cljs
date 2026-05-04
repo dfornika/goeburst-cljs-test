@@ -2,7 +2,8 @@
   (:require [reagent.core :as r]
             [reagent.dom :as rdom]
             [goeburst.parse :as parse]
-            [goeburst.algorithm :as algo]))
+            [goeburst.algorithm :as algo]
+            [goeburst.graph :as graph]))
 
 ;; ---------------------------------------------------------------------------
 ;; State
@@ -33,45 +34,13 @@
         (.readAsText reader file)))))
 
 ;; ---------------------------------------------------------------------------
-;; MST table view (placeholder until D3 graph is wired up)
-;; ---------------------------------------------------------------------------
-
-(defn- edge-row [{:keys [i j d]} ids]
-  [:tr {:key (str i "-" j)}
-   [:td (ids i)]
-   [:td (ids j)]
-   [:td d]
-   [:td (case d 1 "SLV" 2 "DLV" 3 "TLV" "—")]])
-
-(defn- mst-table [result]
-  (let [{:keys [ids edges]} result]
-    [:div
-     [:h2 "MST edges (" (count edges) ")"]
-     [:table
-      [:thead [:tr [:th "ST A"] [:th "ST B"] [:th "Distance"] [:th "Link type"]]]
-      [:tbody
-       (for [e edges]
-         ^{:key (str (:i e) "-" (:j e))}
-         [edge-row e ids])]]]))
-
-(defn- node-table [result]
-  (let [{:keys [nodes]} result]
-    [:div
-     [:h2 "Nodes"]
-     [:table
-      [:thead [:tr [:th "ST"] [:th "SLVs"] [:th "DLVs"] [:th "TLVs"]]]
-      [:tbody
-       (for [{:keys [id slv dlv tlv]} nodes]
-         ^{:key id}
-         [:tr [:td id] [:td slv] [:td dlv] [:td tlv]])]]]))
-
-;; ---------------------------------------------------------------------------
 ;; Root component
 ;; ---------------------------------------------------------------------------
 
 (defn app []
   (let [{:keys [result error]} @state]
-    [:div {:style {:font-family "sans-serif" :max-width "900px" :margin "2rem auto"}}
+    [:div {:style {:font-family "sans-serif" :max-width "960px" :margin "2rem auto"
+                   :padding "0 1rem"}}
      [:h1 "goeBURST"]
      [:p "Upload a pairwise allelic-distance matrix (CSV or TSV, with ST identifiers in the first row and column)."]
      [:input {:type "file" :accept ".csv,.tsv,.txt"
@@ -80,8 +49,8 @@
        [:p {:style {:color "red"}} "Error: " error])
      (when result
        [:div
-        [node-table result]
-        [mst-table result]])]))
+        [graph/legend]
+        [graph/force-graph result]])]))
 
 ;; ---------------------------------------------------------------------------
 ;; Mount

@@ -30,6 +30,14 @@
    [1 0 1]
    [2 1 0]])
 
+(def m-two-slv-pairs-tlv
+  "Two isolated SLV pairs (0–1 and 2–3) whose only cross-pair links are TLVs.
+   max-level=1 or 2 leaves two components; max-level=3 connects them."
+  [[0 1 3 3]
+   [1 0 3 3]
+   [3 3 0 1]
+   [3 3 1 0]])
+
 ;; ---------------------------------------------------------------------------
 ;; slv-components
 ;; ---------------------------------------------------------------------------
@@ -100,3 +108,30 @@
   (testing "chain of 3 STs produces 2 edges forming a spanning tree"
     (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C"] :matrix m-3x3-chain})]
       (is (= 2 (count edges))))))
+
+;; ---------------------------------------------------------------------------
+;; max-level parameter
+;; ---------------------------------------------------------------------------
+
+(deftest max-level-test
+  (testing "max-level=1 includes only SLV edges, leaving DLV-only nodes isolated"
+    ;; m-two-ccs: STs A–B are SLVs; C is a DLV of both.
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C"] :matrix m-two-ccs} 1)]
+      (is (= 1 (count edges)) "only the A–B SLV edge is included")
+      (is (= 1 (:d (first edges))))))
+
+  (testing "max-level=2 includes DLV edges, connecting nodes that were isolated at max-level=1"
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C"] :matrix m-two-ccs} 2)]
+      (is (= 2 (count edges)) "A–B SLV plus one DLV edge to C")
+      (is (every? #(<= (:d %) 2) edges))))
+
+  (testing "max-level=2 excludes TLV edges"
+    ;; m-two-slv-pairs-tlv: A–B and C–D are SLV pairs; cross-pair links are TLVs.
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-two-slv-pairs-tlv} 2)]
+      (is (= 2 (count edges)) "two SLV pairs; TLV cross-links excluded")
+      (is (every? #(= 1 (:d %)) edges))))
+
+  (testing "max-level=3 includes TLV edges connecting otherwise isolated components"
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-two-slv-pairs-tlv} 3)]
+      (is (= 3 (count edges)) "two SLV edges plus one TLV connecting the pairs")
+      (is (some #(= 3 (:d %)) edges)))))

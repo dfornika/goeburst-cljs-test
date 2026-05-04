@@ -118,24 +118,25 @@
 
 (defn kruskal
   "Run Kruskal's algorithm with goeBURST edge priority.
-   Returns a vector of edges {:i :j :d} forming the MST forest."
-  [n-sts matrix counts]
-  (let [edges (->> (for [i (range n-sts)
-                         j (range (inc i) n-sts)
-                         :let [d (get-in matrix [i j])]
-                         :when (and (int? d) (pos? d) (<= d 3))]
-                     [i j d])
-                   (sort-by #(edge-priority counts %)))]
-    (loop [remaining edges
-           uf        (make-uf n-sts)
-           mst       []]
-      (if (empty? remaining)
-        mst
-        (let [[i j d] (first remaining)
-              [uf2 joined?] (uf-union uf i j)]
-          (if joined?
-            (recur (rest remaining) uf2 (conj mst {:i i :j j :d d}))
-            (recur (rest remaining) uf mst)))))))
+   max-level controls the maximum allelic distance for edge inclusion."
+  ([n-sts matrix counts] (kruskal n-sts matrix counts 3))
+  ([n-sts matrix counts max-level]
+   (let [edges (->> (for [i (range n-sts)
+                          j (range (inc i) n-sts)
+                          :let [d (get-in matrix [i j])]
+                          :when (and (int? d) (pos? d) (<= d max-level))]
+                      [i j d])
+                    (sort-by #(edge-priority counts %)))]
+     (loop [remaining edges
+            uf        (make-uf n-sts)
+            mst       []]
+       (if (empty? remaining)
+         mst
+         (let [[i j d] (first remaining)
+               [uf2 joined?] (uf-union uf i j)]
+           (if joined?
+             (recur (rest remaining) uf2 (conj mst {:i i :j j :d d}))
+             (recur (rest remaining) uf mst))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main entry point
@@ -143,13 +144,15 @@
 
 (defn run
   "Given parsed input {:ids [...] :matrix [[...]]} run goeBURST and return
-   {:ids :nodes :edges} where nodes carry CC-relative neighbor-count metadata."
-  [{:keys [ids matrix]}]
-  (let [n      (count ids)
-        counts (cc-relative-counts matrix)
-        mst    (kruskal n matrix counts)
-        nodes  (mapv (fn [i]
-                       (merge {:id (ids i) :idx i}
-                              (counts i)))
-                     (range n))]
-    {:ids ids :nodes nodes :edges mst}))
+   {:ids :nodes :edges} where nodes carry CC-relative neighbor-count metadata.
+   max-level controls the maximum allelic distance for edge inclusion (default 3)."
+  ([parsed] (run parsed 3))
+  ([{:keys [ids matrix]} max-level]
+   (let [n      (count ids)
+         counts (cc-relative-counts matrix)
+         mst    (kruskal n matrix counts max-level)
+         nodes  (mapv (fn [i]
+                        (merge {:id (ids i) :idx i}
+                               (counts i)))
+                      (range n))]
+     {:ids ids :nodes nodes :edges mst})))

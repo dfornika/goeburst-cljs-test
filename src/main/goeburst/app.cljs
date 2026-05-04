@@ -9,7 +9,12 @@
 ;; State
 ;; ---------------------------------------------------------------------------
 
-(defonce state (r/atom {:parsed nil :result nil :error nil :max-level 3}))
+(defonce state (r/atom {:parsed nil :result nil :error nil
+                        :max-level 3
+                        :show-edge-distances false
+                        :force-params {:link-distance 60
+                                       :repulsion     200
+                                       :gravity       0.05}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -19,7 +24,7 @@
   (try
     (swap! state assoc :result (algo/run parsed max-level) :error nil)
     (catch :default err
-      (swap! state assoc :error (or (ex-message err) (str err))))))
+      (swap! state assoc :result nil :error (or (ex-message err) (str err))))))
 
 ;; ---------------------------------------------------------------------------
 ;; File upload
@@ -37,7 +42,8 @@
                     (swap! state assoc :parsed parsed)
                     (run-algo! parsed (:max-level @state)))
                   (catch :default err
-                    (swap! state assoc :error (or (ex-message err) (str err)))))))
+                    (swap! state assoc :parsed nil :result nil
+                           :error (or (ex-message err) (str err)))))))
         (.readAsText reader file)))))
 
 ;; ---------------------------------------------------------------------------
@@ -47,8 +53,21 @@
 (def ^:private sidebar-open-width "280px")
 (def ^:private sidebar-closed-width "40px")
 
+(defn- force-slider [label value min-val max-val step on-change]
+  [:div {:style {:margin "0.6rem 0"}}
+   [:div {:style {:display "flex" :justify-content "space-between"
+                  :font-size "0.82rem" :margin-bottom "2px"}}
+    [:span label]
+    [:span value]]
+   [:input {:type      "range"
+            :min       min-val :max max-val :step step
+            :value     value
+            :style     {:width "100%"}
+            :on-change on-change}]])
+
 (defn- sidebar [open?]
-  (let [{:keys [result error max-level parsed]} @state]
+  (let [{:keys [result error max-level parsed show-edge-distances force-params]} @state
+        {:keys [link-distance repulsion gravity]} force-params]
     [:div {:style {:width           (if @open? sidebar-open-width sidebar-closed-width)
                    :min-width       (if @open? sidebar-open-width sidebar-closed-width)
                    :flex-shrink     0
@@ -85,6 +104,24 @@
                                (when (pos? v)
                                  (swap! state assoc :max-level v)
                                  (when parsed (run-algo! parsed v)))))}]]
+      [:label {:style {:display "flex" :align-items "center" :gap "0.5rem"
+                       :font-size "0.82rem" :cursor "pointer" :margin "0.75rem 0"}}
+       [:input {:type      "checkbox"
+                :checked   show-edge-distances
+                :on-change #(swap! state update :show-edge-distances not)}]
+       "Show edge distances"]
+      [:div {:style {:margin "0.75rem 0"}}
+       [:p {:style {:font-size "0.82rem" :font-weight "bold" :margin "0 0 0.25rem"}}
+        "Layout forces"]
+       [force-slider "Link distance" link-distance 10 300 5
+        #(swap! state assoc-in [:force-params :link-distance]
+                (js/parseInt (.. % -target -value) 10))]
+       [force-slider "Repulsion" repulsion 20 800 10
+        #(swap! state assoc-in [:force-params :repulsion]
+                (js/parseInt (.. % -target -value) 10))]
+       [force-slider "Gravity" gravity 0.00 0.30 0.01
+        #(swap! state assoc-in [:force-params :gravity]
+                (js/parseFloat (.. % -target -value)))]]
       (when error
         [:p {:style {:color "#c0392b" :font-size "0.82rem" :margin "0.5rem 0"}}
          "Error: " error])
@@ -99,12 +136,12 @@
 (defn app []
   (let [open? (r/atom true)]
     (fn []
-      (let [{:keys [result]} @state]
+      (let [{:keys [result show-edge-distances force-params]} @state]
         [:div {:style {:display "flex" :height "100vh" :font-family "sans-serif"}}
          [sidebar open?]
          [:div {:style {:flex 1 :overflow "hidden" :position "relative"}}
           (when result
-            [graph/force-graph result])]]))))
+            [graph/force-graph result show-edge-distances force-params])]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mount

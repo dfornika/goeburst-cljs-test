@@ -2,20 +2,27 @@
   (:require ["d3" :as d3]
             [reagent.core :as r]))
 
-(defn- link-color [d max-d]
-  (cond
-    (= d 1) "#4477aa"
-    (= d 2) "#228833"
-    (= d 3) "#cc3311"
-    :else (let [t (/ (- d 4) (max 1 (- max-d 4)))]
-            (.interpolateRdYlBu d3 (- 1 (* 0.6 t))))))
+(defn- link-color [d min-d max-d]
+  (let [normalized (if (= min-d max-d) 0 (/ (- d min-d) (- max-d min-d)))
+        t          (- 0.9 (* 0.7 normalized))]  ; 0.9 (dark) → 0.2 (light)
+    (.interpolateBlues d3 t)))
 
-(defn- setup-simulation! [svg-el {:keys [ids nodes edges]} vis-state]
-  ;; Stop any running simulation before replacing it.
+(defn- update-label-visibility! [svg-el show?]
+  (-> (.select d3 svg-el)
+      (.selectAll "text.edge-label")
+      (.attr "visibility" (if show? "visible" "hidden"))))
+
+(defn- update-forces! [sim {:keys [link-distance repulsion gravity]}]
+  (.distance (.force sim "link") link-distance)
+  (.strength (.force sim "charge") (- repulsion))
+  (.strength (.force sim "x") gravity)
+  (.strength (.force sim "y") gravity)
+  (-> sim (.alpha 0.3) .restart))
+
+(defn- setup-simulation! [svg-el {:keys [ids nodes edges]} show-distances
+                          {:keys [link-distance repulsion gravity]} vis-state]
   (when-let [prev-sim (:sim @vis-state)]
     (.stop prev-sim))
-  ;; Read state before clearing — zoom transform persists on the DOM element,
-  ;; and D3 has mutated the previous js-nodes with current x/y positions.
   (let [prev-transform (.zoomTransform d3 svg-el)
         prev-js-nodes  (:js-nodes @vis-state)
         prev-positions (when prev-js-nodes
@@ -28,7 +35,9 @@
     (-> (.select d3 svg-el) (.selectAll "*") .remove)
     (let [w        (max 400 (.-clientWidth svg-el))
           h        (max 300 (.-clientHeight svg-el))
-          max-d    (reduce (fn [m {:keys [d]}] (max m d)) 1 edges)
+          ds       (mapv :d edges)
+          min-d    (if (seq ds) (apply min ds) 1)
+          max-d    (if (seq ds) (apply max ds) 1)
           js-nodes (clj->js
                     (mapv (fn [{:keys [id slv]}]
                             (let [[px py] (get prev-positions id)]
@@ -39,23 +48,21 @@
                                     {:source (nth ids i) :target (nth ids j) :d d})
                                   edges))
           svg      (.select d3 svg-el)
-          ;; Apply saved zoom transform immediately so the view doesn't jump.
           g        (-> (.append svg "g")
                        (.attr "transform" (str prev-transform)))
           link-g   (.append g "g")
+          label-g  (.append g "g")
           node-g   (.append g "g")
           sim      (-> (.forceSimulation d3 js-nodes)
-                       ;; Low alpha when resuming from saved positions so nodes
-                       ;; settle near where they were rather than flying around.
                        (cond-> prev-positions (.alpha 0.3))
                        (.force "link"
                                (-> (.forceLink d3 js-links)
                                    (.id #(.-id %))
-                                   (.distance 60)))
-                       (.force "charge" (.strength (.forceManyBody d3) -200))
+                                   (.distance link-distance)))
+                       (.force "charge" (.strength (.forceManyBody d3) (- repulsion)))
                        (.force "collide" (.radius (.forceCollide d3) 15))
-                       (.force "x" (.strength (.forceX d3 (/ w 2)) 0.05))
-                       (.force "y" (.strength (.forceY d3 (/ h 2)) 0.05)))
+                       (.force "x" (.strength (.forceX d3 (/ w 2)) gravity))
+                       (.force "y" (.strength (.forceY d3 (/ h 2)) gravity)))
           drag     (-> (.drag d3)
                        (.on "start" (fn [ev]
                                       (when (zero? (.-active ev))
@@ -74,16 +81,31 @@
                        (.selectAll "line")
                        (.data js-links)
                        (.join "line")
-                       (.attr "stroke" #(link-color (.-d %) max-d))
+                       (.attr "stroke" #(link-color (.-d %) min-d max-d))
                        (.attr "stroke-width" 1.5)
                        (.attr "stroke-opacity" 0.8))
+          labels   (-> label-g
+                       (.selectAll "text.edge-label")
+                       (.data js-links)
+                       (.join "text")
+                       (.attr "class" "edge-label")
+                       (.text #(str (.-d %)))
+                       (.attr "text-anchor" "middle")
+                       (.attr "dominant-baseline" "central")
+                       (.attr "font-size" "10px")
+                       (.attr "font-family" "sans-serif")
+                       (.attr "fill" "#333")
+                       (.attr "stroke" "white")
+                       (.attr "stroke-width" 3)
+                       (.attr "paint-order" "stroke")
+                       (.attr "pointer-events" "none")
+                       (.attr "visibility" (if show-distances "visible" "hidden")))
           node-gs  (-> node-g
                        (.selectAll "g")
                        (.data js-nodes)
                        (.join "g")
                        (.call drag)
                        (.attr "cursor" "grab"))]
-      ;; Store live sim and js-nodes so next call can stop the sim and read x/y.
       (swap! vis-state assoc :sim sim :js-nodes js-nodes)
       (-> node-gs
           (.append "circle")
@@ -104,6 +126,8 @@
              (.attr links "y1" #(.. % -source -y))
              (.attr links "x2" #(.. % -target -x))
              (.attr links "y2" #(.. % -target -y))
+             (.attr labels "x" #(/ (+ (.. % -source -x) (.. % -target -x)) 2))
+             (.attr labels "y" #(/ (+ (.. % -source -y) (.. % -target -y)) 2))
              (.attr node-gs "transform"
                     #(str "translate(" (.-x %) "," (.-y %) ")"))))
       (.call svg
@@ -112,34 +136,44 @@
                  (.on "zoom" (fn [event]
                                (.attr g "transform" (.. event -transform toString)))))))))
 
-(defn force-graph [_]
+(defn force-graph [_ _ _]
   (let [svg-ref   (atom nil)
         vis-state (atom {})]
     (r/create-class
      {:display-name "force-graph"
       :component-did-mount
       (fn [this]
-        (let [[_ r] (r/argv this)]
-          (when @svg-ref (setup-simulation! @svg-ref r vis-state))))
+        (let [[_ r show-distances force-params] (r/argv this)]
+          (when @svg-ref
+            (setup-simulation! @svg-ref r show-distances force-params vis-state))))
       :component-did-update
-      (fn [this _]
-        (let [[_ r] (r/argv this)]
-          (when @svg-ref (setup-simulation! @svg-ref r vis-state))))
+      (fn [this prev-argv]
+        (let [[_ result show-distances force-params] (r/argv this)
+              [_ prev-result prev-show prev-force-params] prev-argv]
+          (when @svg-ref
+            (if (not= result prev-result)
+              (setup-simulation! @svg-ref result show-distances force-params vis-state)
+              (do
+                (when (not= show-distances prev-show)
+                  (update-label-visibility! @svg-ref show-distances))
+                (when (not= force-params prev-force-params)
+                  (when-let [sim (:sim @vis-state)]
+                    (update-forces! sim force-params))))))))
       :component-will-unmount
       (fn [_]
         (when-let [sim (:sim @vis-state)]
           (.stop sim)))
       :reagent-render
-      (fn [_]
+      (fn [_ _ _]
         [:svg {:ref   #(reset! svg-ref %)
                :style {:width "100%" :height "100%" :display "block"}}])})))
 
 (defn legend []
-  [:div {:style {:display "flex" :gap "1.5rem" :margin "0.5rem 0"
-                 :font-size "0.85rem" :font-family "sans-serif"}}
-   (for [[label color] [["SLV" "#4477aa"] ["DLV" "#228833"] ["TLV" "#cc3311"]]]
-     ^{:key label}
-     [:span {:style {:display "flex" :align-items "center" :gap "0.3rem"}}
-      [:span {:style {:display "inline-block" :width "24px" :height "3px"
-                      :background color}}]
-      label])])
+  (let [dark  (.interpolateBlues d3 0.9)
+        light (.interpolateBlues d3 0.2)]
+    [:div {:style {:display "flex" :align-items "center" :gap "0.5rem"
+                   :margin "0.5rem 0" :font-size "0.82rem" :font-family "sans-serif"}}
+     [:span "Shorter"]
+     [:div {:style {:flex 1 :height "6px" :border-radius "3px"
+                    :background (str "linear-gradient(to right, " dark ", " light ")")}}]
+     [:span "Longer"]]))

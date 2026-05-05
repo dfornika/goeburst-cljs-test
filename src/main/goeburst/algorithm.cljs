@@ -152,7 +152,9 @@
 
    :level encodes link confidence: at which tiebreak step the chosen edge
    was separated from its closest competitor in the sorted edge list.
-   nil  → unique best (no competitor); 1–2 → SLV; 3–4 → DLV; 5–6 → TLV; 7+ → other."
+   nil → unique best (no competitor)
+   0   → separated by allelic distance alone (no count-level tiebreak was needed)
+   1–2 → SLV; 3–4 → DLV; 5–6 → TLV; 7+ → other."
   ([n-sts ids matrix counts] (kruskal n-sts ids matrix counts 3))
   ([n-sts ids matrix counts max-level]
    (let [priority   (fn [e] (edge-priority ids counts e))

@@ -10,6 +10,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defonce state (r/atom {:parsed nil :result nil :error nil
+                        :method :goeburst
                         :max-level 3
                         :show-edge-distances false
                         :force-params {:link-distance 60
@@ -22,7 +23,10 @@
 
 (defn- run-algo! [parsed max-level]
   (try
-    (swap! state assoc :result (algo/run parsed max-level) :error nil)
+    (let [result (if (= :single-linkage (:method @state))
+                   (algo/run-single-linkage parsed max-level)
+                   (algo/run parsed max-level))]
+      (swap! state assoc :result result :error nil))
     (catch :default err
       (swap! state assoc :result nil :error (or (ex-message err) (str err))))))
 
@@ -66,7 +70,7 @@
             :on-change on-change}]])
 
 (defn- sidebar [open?]
-  (let [{:keys [result error max-level parsed show-edge-distances force-params]} @state
+  (let [{:keys [result error max-level parsed show-edge-distances force-params method]} @state
         {:keys [link-distance repulsion gravity]} force-params]
     [:div {:style {:width           (if @open? sidebar-open-width sidebar-closed-width)
                    :min-width       (if @open? sidebar-open-width sidebar-closed-width)
@@ -93,6 +97,16 @@
                 :accept    ".csv,.tsv,.txt"
                 :style     {:font-size "0.82rem" :max-width "100%"}
                 :on-change on-file-change}]]
+      [:div {:style {:margin "0.75rem 0" :display "flex" :align-items "center" :gap "0.5rem"}}
+       [:label {:style {:font-size "0.82rem"}} "Method:"]
+       [:select {:value     (name method)
+                 :style     {:font-size "0.82rem"}
+                 :on-change (fn [e]
+                              (let [m (keyword (.. e -target -value))]
+                                (swap! state assoc :method m)
+                                (when parsed (run-algo! parsed max-level))))}
+        [:option {:value "goeburst"} "goeBURST"]
+        [:option {:value "single-linkage"} "Single-linkage"]]]
       [:div {:style {:margin "0.75rem 0" :display "flex" :align-items "center" :gap "0.5rem"}}
        [:label {:style {:font-size "0.82rem"}} "Max distance:"]
        [:input {:type      "number"

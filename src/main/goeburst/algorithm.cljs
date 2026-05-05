@@ -182,6 +182,50 @@
              (recur (inc k) (rest rem) uf mst))))))))
 
 ;; ---------------------------------------------------------------------------
+;; Single-linkage MST  (standard Kruskal's, distance only)
+;; ---------------------------------------------------------------------------
+
+(defn- single-linkage-priority
+  "Sort key for single-linkage MST: distance alone, with ST ID as the only tiebreak.
+   Equivalent to Kruskal's standard MST with no neighborhood-count comparisons."
+  [ids [i j d]]
+  (let [id-i (ids i)
+        id-j (ids j)
+        [lo-id hi-id] (if (neg? (compare-st-ids id-i id-j))
+                        [id-i id-j]
+                        [id-j id-i])]
+    [d (count lo-id) lo-id (count hi-id) hi-id]))
+
+(defn run-single-linkage
+  "Build a minimum spanning forest using single-linkage (distance-only) priority.
+   Equivalent to running Kruskal's MST with no goeBURST neighbourhood-count tiebreaks.
+   Returns {:ids :nodes :edges} in the same format as run; edges carry :i :j :d
+   but no :level (the link-confidence concept is specific to goeBURST).
+   max-level controls the maximum allelic distance for edge inclusion (default 3)."
+  ([parsed] (run-single-linkage parsed 3))
+  ([{:keys [ids matrix]} max-level]
+   (let [n         (count ids)
+         priority  (fn [e] (single-linkage-priority ids e))
+         raw-edges (for [i (range n)
+                         j (range (inc i) n)
+                         :let [d (get-in matrix [i j])]
+                         :when (and (int? d) (pos? d) (<= d max-level))]
+                     [i j d])
+         sorted    (sort-by priority raw-edges)
+         mst       (loop [rem sorted
+                          uf  (make-uf n)
+                          acc []]
+                     (if (empty? rem)
+                       acc
+                       (let [[i j d]      (first rem)
+                             [uf2 joined?] (uf-union uf i j)]
+                         (if joined?
+                           (recur (rest rem) uf2 (conj acc {:i i :j j :d d}))
+                           (recur (rest rem) uf acc)))))
+         nodes     (mapv (fn [i] {:id (ids i) :idx i}) (range n))]
+     {:ids ids :nodes nodes :edges mst})))
+
+;; ---------------------------------------------------------------------------
 ;; Main entry point
 ;; ---------------------------------------------------------------------------
 

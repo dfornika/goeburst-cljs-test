@@ -38,6 +38,19 @@
    [3 3 0 1]
    [3 3 1 0]])
 
+(def m-star
+  "Hub-and-spoke topology where ST 'A' (idx 0) is an SLV of 'B', 'C', and 'D'.
+   'B' (idx 1) and 'C' (idx 2) are also SLVs of each other; 'D' (idx 3) only
+   connects to 'A'.  This creates three edges with distinct priority levels:
+     A–B and A–C tie on all μ counts → ST ID tiebreak (level ≥ 9)
+     A–C is separated from A–D at min-SLV                (level 2)
+     A–D is separated from B–C at max-SLV                (level 1)"
+  ;;   A  B  C  D
+  [[0  1  1  1]   ; A
+   [1  0  1  2]   ; B
+   [1  1  0  2]   ; C
+   [1  2  2  0]]) ; D
+
 ;; ---------------------------------------------------------------------------
 ;; slv-components
 ;; ---------------------------------------------------------------------------
@@ -135,3 +148,70 @@
     (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-two-slv-pairs-tlv} 3)]
       (is (= 3 (count edges)) "two SLV edges plus one TLV connecting the pairs")
       (is (some #(= 3 (:d %)) edges)))))
+
+;; ---------------------------------------------------------------------------
+;; :level / link-confidence
+;; ---------------------------------------------------------------------------
+
+(deftest edge-level-test
+  (testing ":level is nil when no competing edge exists"
+    ;; Only one possible edge in a 2-ST dataset, so no successor to compare against.
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B"] :matrix m-2x2-slv})]
+      (is (nil? (:level (first edges))))))
+
+  (testing "every selected edge carries a :level key"
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-star})]
+      (is (every? #(contains? % :level) edges))))
+
+  (testing "level=1 when max SLV count separates the chosen edge from its successor"
+    ;; A–D is separated from B–C at the max-SLV comparison (key position 1).
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-star})
+          ad (first (filter #(= #{(:i %) (:j %)} #{0 3}) edges))]
+      (is (= 1 (:level ad)))))
+
+  (testing "level=2 when min SLV count separates the chosen edge from its successor"
+    ;; A–C ties A–D on max SLV but is separated at min SLV (key position 2).
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-star})
+          ac (first (filter #(= #{(:i %) (:j %)} #{0 2}) edges))]
+      (is (= 2 (:level ac)))))
+
+  (testing "level>6 when count-level tiebreaks are exhausted and ST IDs decide"
+    ;; A–B and A–C share identical μ counts at all levels; the ST ID comparison decides.
+    (let [{:keys [edges]} (algo/run {:ids ["A" "B" "C" "D"] :matrix m-star})
+          ab (first (filter #(= #{(:i %) (:j %)} #{0 1}) edges))]
+      (is (> (:level ab) 6)))))
+
+;; ---------------------------------------------------------------------------
+;; Single-linkage
+;; ---------------------------------------------------------------------------
+
+(deftest run-single-linkage-test
+  (testing "produces n-1 edges for a fully connected graph"
+    (let [{:keys [edges]} (algo/run-single-linkage {:ids ["A" "B" "C"] :matrix m-3x3-chain})]
+      (is (= 2 (count edges)))))
+
+  (testing "max-level=1 excludes DLV edges (same behaviour as run)"
+    (let [{:keys [edges]} (algo/run-single-linkage {:ids ["A" "B" "C"] :matrix m-two-ccs} 1)]
+      (is (= 1 (count edges)))
+      (is (= 1 (:d (first edges))))))
+
+  (testing "max-level=2 connects nodes reachable only by DLV"
+    (let [{:keys [edges]} (algo/run-single-linkage {:ids ["A" "B" "C"] :matrix m-two-ccs} 2)]
+      (is (= 2 (count edges)))))
+
+  (testing "output format is compatible with run"
+    (let [result (algo/run-single-linkage {:ids ["A" "B"] :matrix m-2x2-slv})]
+      (is (contains? result :ids))
+      (is (contains? result :nodes))
+      (is (contains? result :edges))
+      (is (every? #(contains? % :id) (:nodes result)))
+      (is (every? #(and (contains? % :i) (contains? % :j) (contains? % :d))
+                  (:edges result)))))
+
+  (testing "edges carry no :level field (confidence level is a goeBURST concept)"
+    (let [{:keys [edges]} (algo/run-single-linkage {:ids ["A" "B" "C"] :matrix m-3x3-chain})]
+      (is (every? #(not (contains? % :level)) edges))))
+
+  (testing "nodes carry no SLV/DLV/TLV count fields"
+    (let [{:keys [nodes]} (algo/run-single-linkage {:ids ["A" "B" "C"] :matrix m-3x3-chain})]
+      (is (every? #(not (contains? % :slv)) nodes)))))

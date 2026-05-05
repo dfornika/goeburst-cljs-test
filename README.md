@@ -14,7 +14,7 @@ The algorithm is described in:
 2. **Runs goeBURST**: applies Kruskal's algorithm with the goeBURST edge-priority ordering (SLV → DLV → TLV → occurrence frequency → ST ID) to produce a globally optimal minimum spanning forest.
 3. **Visualises** the result as an interactive D3 force-directed graph.
 
-Each edge carries a `:level` field encoding the tiebreak level at which it was selected (1–2 = SLV, 3–4 = DLV, 5–6 = TLV), matching the link-confidence colouring described in the paper.
+Each edge carries a `:level` field indicating how it was distinguished from the next candidate edge: `nil` means there was no successor edge to compare against, `0` means distance alone separated them, and `1–6` encode the goeBURST tiebreak level (1–2 = SLV, 3–4 = DLV, 5–6 = TLV), matching the link-confidence colouring described in the paper.
 
 ## Input format
 

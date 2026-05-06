@@ -1,6 +1,6 @@
-(ns goeburst.algorithm-test
+(ns span.algorithm-test
   (:require [cljs.test :refer [deftest is testing]]
-            [goeburst.algorithm :as algo]))
+            [span.algorithm :as algo]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test fixtures

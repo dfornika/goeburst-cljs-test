@@ -1,8 +1,8 @@
-# goeBURST viewer
+# Span
 
-A browser-based implementation of the **goeBURST** algorithm for visualising pairwise allelic-distance data as a minimum spanning forest.
+A browser-based system for visualising pairwise allelic-distance data as a minimum spanning forest.
 
-The algorithm is described in:
+The goeBURST algorithm is described in:
 
 > Francisco AP, Bugalho M, Ramirez M, Carriço JA (2009).
 > *Global optimal eBURST analysis of multilocus typing data using a graphic matroid approach.*
@@ -83,12 +83,13 @@ The graph supports **scroll to zoom** and **click-and-drag to pan**. Individual 
 
 ```
 src/
-  main/goeburst/
+  main/span/
     parse.cljs      – TSV/CSV parser → {:ids [...] :matrix [[...]]}
-    algorithm.cljs  – goeBURST algorithm (union-find, CC counts, Kruskal's)
-    graph.cljs      – D3 force-directed visualisation (Reagent component)
-    app.cljs        – UI shell (sidebar, state, file upload)
-  test/goeburst/
+    algorithm.cljs  – goeBURST and single-linkage algorithms (union-find, CC counts, Kruskal's)
+    graph.cljs      – D3 force-directed visualisation (UIx component)
+    app.cljs        – UI shell (sidebar, file upload)
+    state.cljs      - App state
+  test/span/
     parse_test.cljs
     algorithm_test.cljs
 public/
@@ -97,4 +98,4 @@ public/
 
 ## License
 
-GNU General Public License v3.0 — see the algorithm reference above for the original Java implementation this is based on.
+GNU General Public License v3.0 — see the goeBURST algorithm reference above for the original Java implementation this is based on.

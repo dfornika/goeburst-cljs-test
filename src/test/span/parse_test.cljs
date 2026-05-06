@@ -1,6 +1,6 @@
-(ns goeburst.parse-test
+(ns span.parse-test
   (:require [cljs.test :refer [deftest is testing]]
-            [goeburst.parse :as parse]))
+            [span.parse :as parse]))
 
 (deftest parse-header-test
   (testing "returns trimmed IDs from header row"

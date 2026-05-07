@@ -1,17 +1,29 @@
 {
-  "name": "goeburst-cljs",
+  "name": "span",
   "version": "0.1.0",
-  "description": "goeBURST minimum spanning tree viewer",
+  "description": "Minimum-Spanning Tree Explorer",
   "scripts": {
-    "dev": "shadow-cljs watch app",
-    "release": "shadow-cljs release app"
+    "dev": "clojure -M:dev -m shadow.cljs.devtools.cli watch app",
+    "release": "clojure -M:dev -m shadow.cljs.devtools.cli release app",
+    "test": "clojure -M:dev:test -m shadow.cljs.devtools.cli compile test",
+    "test:watch": "clojure -M:dev:test -m shadow.cljs.devtools.cli watch test",
+    "docs": "clojure -X:codox"
   },
   "devDependencies": {
-    "shadow-cljs": "3.4.6"
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "process": "^0.11.10",
+    "react-refresh": "^0.18.0",
+    "shadow-cljs": "3.4.6",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "d3": "^7.9.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "ag-grid-community": "^35.0.1",
+    "ag-grid-react": "^35.0.1",
+    "jspdf": "^4.2.0",
+    "svg2pdf.js": "^2.7.0"
   }
 }

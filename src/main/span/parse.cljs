@@ -1,4 +1,4 @@
-(ns goeburst.parse
+(ns span.parse
   (:require [clojure.string :as str]))
 
 (defn- parse-row [line]

@@ -1,14 +1,18 @@
-(ns goeburst.algorithm)
+(ns span.algorithm)
 
 ;; ---------------------------------------------------------------------------
 ;; Union-Find (path-compressed, union-by-rank)
 ;; ---------------------------------------------------------------------------
 
-(defn- make-uf [n]
+(defn- make-uf 
+  ""
+  [n]
   {:parent (vec (range n))
    :rank   (vec (repeat n 0))})
 
-(defn- uf-find [uf x]
+(defn- uf-find 
+  ""
+  [uf x]
   (let [parent (:parent uf)
         [root path] (loop [node x, path []]
                       (let [p (parent node)]
@@ -18,7 +22,9 @@
         parent' (reduce (fn [p node] (assoc p node root)) parent path)]
     [(assoc uf :parent parent') root]))
 
-(defn- uf-union [uf x y]
+(defn- uf-union 
+  ""
+  [uf x y]
   (let [[uf rx] (uf-find uf x)
         [uf ry] (uf-find uf y)]
     (if (= rx ry)

@@ -1,6 +1,6 @@
-(ns goeburst.graph
+(ns span.graph
   (:require ["d3" :as d3]
-            [reagent.core :as r]))
+            [uix.core :as uix :refer [defui $]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Visual attribute maps
@@ -8,20 +8,20 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private node-circle-attrs
-  {:r 8 
-   :fill "#aaaaaa" 
-   :stroke "#ffffff" 
+  {:r 8
+   :fill "#aaaaaa"
+   :stroke "#ffffff"
    :stroke-width 1.5})
 
 (def ^:private node-label-attrs
-  {:x 11 
-   :y 4 
-   :font-size "11px" 
+  {:x 11
+   :y 4
+   :font-size "11px"
    :font-family "sans-serif"})
 
 ;; stroke (dynamic, per-edge) and visibility (toggled separately) are NOT here
 (def ^:private edge-line-attrs
-  {:stroke-width 1.5 
+  {:stroke-width 1.5
    :stroke-opacity 0.8})
 
 ;; class, text content, and visibility are set separately
@@ -212,51 +212,65 @@
                                (.attr g "transform" (.. event -transform toString)))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Reagent component
+;; UIx component
 ;; ---------------------------------------------------------------------------
 
-(defn force-graph [_ _ _]
-  (let [svg-ref   (atom nil)
-        vis-state (atom {})]
-    (r/create-class
-     {:display-name "force-graph"
-      :component-did-mount
-      (fn [this]
-        (let [[_ r show-distances force-params] (r/argv this)]
-          (when @svg-ref
-            (setup-simulation! @svg-ref r show-distances force-params vis-state))))
-      :component-did-update
-      (fn [this prev-argv]
-        (let [[_ result show-distances force-params] (r/argv this)
-              [_ prev-result prev-show prev-force-params] prev-argv]
-          (when @svg-ref
-            (if (not= result prev-result)
-              (setup-simulation! @svg-ref result show-distances force-params vis-state)
-              (do
-                (when (not= show-distances prev-show)
-                  (update-label-visibility! @svg-ref show-distances))
-                (when (not= force-params prev-force-params)
-                  (when-let [sim (:sim @vis-state)]
-                    (update-forces! sim force-params))))))))
-      :component-will-unmount
-      (fn [_]
-        (when-let [sim (:sim @vis-state)]
-          (.stop sim)))
-      :reagent-render
-      (fn [_ _ _]
-        [:svg {:ref   #(reset! svg-ref %)
-               :style {:width "100%" :height "100%" :display "block"}}])})))
+(defui force-graph [{:keys [result show-distances force-params]}]
+  (let [svg-ref   (uix/use-ref nil)
+        ;; vis-state holds {:sim ... :js-nodes ...}; UIx refs are atom-like so
+        ;; setup-simulation! can @vis-state and swap! vis-state unchanged.
+        vis-state (uix/use-ref {})
+        ;; prev-ref tracks the last set of props seen by the effect so we can
+        ;; distinguish an initial mount (::init) from the three update paths.
+        prev-ref  (uix/use-ref ::init)]
+
+    ;; Runs after every render where result, show-distances, or force-params changed.
+    ;; Routes to setup-simulation! (full rebuild), update-label-visibility!, or
+    ;; update-forces! based on which prop actually changed.
+    (uix/use-effect
+     (fn []
+       (when-let [el @svg-ref]
+         (let [prev @prev-ref]
+           (cond
+             (= ::init prev)
+             (setup-simulation! el result show-distances force-params vis-state)
+
+             (not= result (:result prev))
+             (setup-simulation! el result show-distances force-params vis-state)
+
+             (not= show-distances (:show-distances prev))
+             (update-label-visibility! el show-distances)
+
+             (not= force-params (:force-params prev))
+             (when-let [sim (:sim @vis-state)]
+               (update-forces! sim force-params))))
+         (reset! prev-ref {:result         result
+                           :show-distances show-distances
+                           :force-params   force-params}))
+       nil)
+     [result show-distances force-params])
+
+    ;; Cleanup: stop the simulation when this component unmounts.
+    (uix/use-effect
+     (fn []
+       (fn []
+         (when-let [sim (:sim @vis-state)]
+           (.stop sim))))
+     [])
+
+    ($ :svg {:ref   svg-ref
+             :style {:width "100%" :height "100%" :display "block"}})))
 
 ;; ---------------------------------------------------------------------------
 ;; Legend
 ;; ---------------------------------------------------------------------------
 
-(defn legend []
+(defui legend [_]
   (let [dark  (.interpolateBlues d3 0.9)
         light (.interpolateBlues d3 0.2)]
-    [:div {:style {:display "flex" :align-items "center" :gap "0.5rem"
-                   :margin "0.5rem 0" :font-size "0.82rem" :font-family "sans-serif"}}
-     [:span "Shorter"]
-     [:div {:style {:flex 1 :height "6px" :border-radius "3px"
-                    :background (str "linear-gradient(to right, " dark ", " light ")")}}]
-     [:span "Longer"]]))
+    ($ :div {:style {:display "flex" :align-items "center" :gap "0.5rem"
+                     :margin "0.5rem 0" :font-size "0.82rem" :font-family "sans-serif"}}
+       ($ :span "Shorter")
+       ($ :div {:style {:flex 1 :height "6px" :border-radius "3px"
+                        :background (str "linear-gradient(to right, " dark ", " light ")")}})
+       ($ :span "Longer"))))
